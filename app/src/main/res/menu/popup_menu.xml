@@ -1,0 +1,61 @@
+<menu xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    tools:context="com.example.auth.app.fragments.ToolsFragment">
+
+    <item
+        android:orderInCategory="0"
+        android:id="@+id/action_auth_test"
+        android:title="@string/action_auth_test"
+        android:showAsAction="never" />
+
+    <!--<item-->
+        <!--android:orderInCategory="0"-->
+        <!--android:id="@+id/action_write_key"-->
+        <!--android:title="@string/action_write_key"-->
+        <!--android:showAsAction="never" />-->
+
+
+    <!--<item-->
+        <!--android:orderInCategory="0"-->
+        <!--android:id="@+id/action_chkey"-->
+        <!--android:title="@string/action_chkey"-->
+        <!--android:showAsAction="never" />-->
+
+    <!--<item-->
+        <!--android:orderInCategory="0"-->
+        <!--android:id="@+id/action_set_auth0"-->
+        <!--android:title="@string/action_set_auth0"-->
+        <!--android:showAsAction="never" />-->
+
+    <!--<item-->
+        <!--android:orderInCategory="0"-->
+        <!--android:id="@+id/action_set_auth1"-->
+        <!--android:title="@string/action_set_auth1"-->
+        <!--android:showAsAction="never" />-->
+
+    <!--<item-->
+        <!--android:orderInCategory="0"-->
+        <!--android:id="@+id/action_write"-->
+        <!--android:title="@string/action_write_test"-->
+        <!--android:showAsAction="never" />-->
+
+    <item
+        android:orderInCategory="0"
+        android:id="@+id/action_erase"
+        android:title="@string/action_erase_all"
+        android:showAsAction="never" />
+
+    <!--<item-->
+        <!--android:orderInCategory="0"-->
+        <!--android:id="@+id/action_preferences"-->
+        <!--android:title="@string/action_show_prefs"-->
+        <!--android:showAsAction="never" />-->
+
+    <!--<item-->
+        <!--android:orderInCategory="0"-->
+        <!--android:id="@+id/action_archive"-->
+        <!--android:title="@string/action_archive"-->
+        <!--android:showAsAction="never" />-->
+
+
+</menu>
