@@ -1,8 +1,0 @@
-<menu xmlns:android="http://schemas.android.com/apk/res/android">
-    <item
-        android:id="@+id/action_new_key"
-        android:title="New Key"
-        android:showAsAction="ifRoom"
-        android:icon="@drawable/ic_action_add_key"
-        android:orderInCategory="0"/>
-</menu>
