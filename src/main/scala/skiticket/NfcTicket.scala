@@ -2,83 +2,10 @@ package skiticket
 
 import java.security.MessageDigest
 import java.time._
-import javax.crypto.Mac
-import javax.crypto.spec.SecretKeySpec
 
-import scodec.Codec
 import scodec.bits._
-import scodec.codecs._
-import skiticket.TicketData.Subscriptions
 import skiticket.nfc.{NfcConstants, NfcTools}
 import skiticket.utils.ByteSeqExtension._
-import skiticket.utils.codecs._
-
-case class TicketData(ridesRemaining: Int,
-                      subscriptions: Subscriptions,
-                      lastValidation: LocalDateTime) {
-    require(ridesRemaining >= 0)
-    require(ridesRemaining <= TicketData.MaxNumberOfRides)
-
-    {
-        val maxDate: LocalDate =
-            LocalDate.now().plusDays(TicketData.MaxSubscriptionLength)
-
-        subscriptions.foreach {
-            case Some(Left(expiryDate: LocalDate)) =>
-                require(maxDate.isAfter(expiryDate))
-
-            case Some(Right(days: Int)) =>
-                require(days > 0
-                        && days <= TicketData.MaxSubscriptionLength)
-
-            case None =>
-        }
-    }
-
-    {
-        val timeSinceLastValidation =
-            Duration.between(lastValidation, LocalDateTime.now())
-
-        require(timeSinceLastValidation.compareTo(TicketData.AntiPassBackTimer) >= 0)
-    }
-}
-
-object TicketData {
-    val NumberOfSubscriptions = 3
-    type Subscription = Option[Either[LocalDate, Int]]
-    type Subscriptions = List[Subscription]
-
-    val MaxNumberOfRides = 100
-    val MaxSubscriptionLength = 365
-    val AntiPassBackTimer: Duration = Duration.ofMinutes(1)
-
-    val BaseDate: LocalDate = LocalDate.of(2017, 12, 3)
-
-    def codec(keyBytes: Seq[Byte], counter: Int): Codec[TicketData] = {
-        val daysCodec = uintL(15)
-
-        val macAlgorithm = "HmacMD5"
-        val key = new SecretKeySpec(keyBytes.toArray, macAlgorithm)
-        val macInstance = Mac.getInstance(macAlgorithm)
-        macInstance.init(key)
-
-        macCodec(macInstance, uint32L.encode(counter).require) {
-            ("ridesRemaining" | uint16L) ::
-                    ("subscriptions" | listOfN(
-                        provide(NumberOfSubscriptions),
-                        presentIfNonZero(
-                            either(
-                                bool(1),
-                                localDateDaysCodec(BaseDate, daysCodec),
-                                daysCodec
-                            ),
-                            Right(0)
-                        )
-                    )) ::
-                    ("lastValidation" | localDateTimeCodec)
-        }.as[TicketData]
-    }
-}
 
 case class NfcTicket(nfc: NfcTools) {
     val Uid: Seq[Byte] = {
@@ -102,31 +29,37 @@ case class NfcTicket(nfc: NfcTools) {
         authenticationKey.slice(0, NfcConstants.KeySize)
 
     def isSkiTicket: Boolean = {
-        nfc.memory(NfcTicket.TagPage) sameElements NfcTicket.TagBytes
+        nfc.memory(NfcTicket.TagPage) == NfcTicket.TagBytes
     }
 
-    private val macAlgorithm: String = "HmacMD5"
+    def readData(): Ticket = {
+        readData(nfc.getCounter)
+    }
 
-    def readData(currentCounter: Int): TicketData = {
-        val codec = TicketData.codec(authenticationKey, currentCounter)
-        val sizeInPages = (codec.sizeBound.exact.get.toInt / 8+ NfcConstants.PageSize - 1) / NfcConstants.PageSize
+    private def readData(currentCounter: Int): Ticket = {
+        val codec = Ticket.codec(authenticationKey, currentCounter)
+        val sizeInPages = (codec.sizeBound.lowerBound.toInt / 8 + NfcConstants .PageSize - 1) / NfcConstants.PageSize
         val startPage = NfcTicket.DataPage + sizeInPages * currentCounter % 2
 
         val bytes = nfc.memory(startPage, sizeInPages)
-        val data = codec.decode(BitVector.view(writtenBytes.toArray)).require.value
+        val data = codec.decode(BitVector.view(bytes.toArray)).require.value
 
         data
     }
 
-    def writeData(data: TicketData, currentCounter: Int): Unit = {
+    def writeData(data: Ticket): Unit = {
+        writeData(data, nfc.getCounter)
+    }
+
+    private def writeData(data: Ticket, currentCounter: Int): Unit = {
         val nextCounter = currentCounter + 1
 
-        val codec = TicketData.codec(authenticationKey, nextCounter)
+        val codec = Ticket.codec(authenticationKey, nextCounter)
 
         val bytes = codec.encode(data).require.toByteArray
 
-        val sizeInPages = (codec.sizeBound.exact.get.toInt / 8 + NfcConstants.PageSize - 1) / NfcConstants.PageSize
-        assert(codec.sizeBound.exact.get / 8 == bytes.length)
+        val sizeInPages = (codec.sizeBound.lowerBound.toInt / 8 + NfcConstants .PageSize - 1) / NfcConstants.PageSize
+        assert(codec.sizeBound.lowerBound.toInt / 8 == bytes.length)
         val startPage = NfcTicket.DataPage + sizeInPages * nextCounter % 2
 
         nfc.memory(startPage, sizeInPages).update(bytes.toSeq)
@@ -154,12 +87,11 @@ case class NfcTicket(nfc: NfcTools) {
         println("3DES key changed.")
 
         writeData(
-            TicketData(
+            Ticket(
                 0,
-                List[TicketData.Subscription](None, None, None),
+                List[Ticket.Subscription](None, None, None),
                 LocalDateTime.ofEpochSecond(0, 0, ZoneOffset.UTC)
-            ),
-            nfc.getCounter
+            )
         )
     }
 

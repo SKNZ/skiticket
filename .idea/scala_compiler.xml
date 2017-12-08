@@ -4,8 +4,6 @@
     <profile name="sbt 1" modules="pc">
       <option name="implicitConversions" value="true" />
     </profile>
-    <profile name="sbt 2" modules="root">
-      <option name="implicitConversions" value="true" />
-    </profile>
+    <profile name="sbt 2" modules="root" />
   </component>
 </project>

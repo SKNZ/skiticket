@@ -1,9 +1,10 @@
 package skiticket.utils
 
+import java.time.LocalDateTime
 import java.time.temporal.ChronoUnit
-import java.time.{LocalDate, LocalDateTime, ZoneOffset}
 import javax.crypto.Mac
 
+import scodec.Attempt.{Failure, Successful}
 import scodec.bits.BitVector
 import scodec.codecs._
 import scodec.{Attempt, Codec, DecodeResult, Err, SizeBound}
@@ -34,22 +35,18 @@ package object codecs {
         override def sizeBound: SizeBound = codec.sizeBound
     }
 
-    def localDateDaysCodec[T](baseDate: LocalDate, numCodec: Codec[T])
-                             (implicit integral: Integral[T]): Codec[LocalDate] =
-        numCodec.exmap({
+    def offsetDateTimeCodec[T](baseDate: LocalDateTime, numCodec: Codec[T])
+                              (implicit integral: Integral[T])
+    : Codec[LocalDateTime] =
+        numCodec.exmap(
             num =>
-                Attempt.successful(baseDate.plusDays(integral.toLong(num)))
-        }, { date =>
-            val days = ChronoUnit.DAYS.between(baseDate, date)
-            Attempt.successful(integral.fromInt(days.toInt))
-        })
+                Attempt.successful(baseDate.plusSeconds(integral.toLong(num))),
+            { dateTime =>
+                val seconds = ChronoUnit.SECONDS.between(baseDate, dateTime)
+                Attempt.successful(integral.fromInt(seconds.toInt))
+            })
 
-    def localDateTimeCodec: Codec[LocalDateTime] = uint32L.exmap[LocalDateTime](
-        x => Attempt.Successful(LocalDateTime.ofEpochSecond(x, 0, ZoneOffset.UTC)),
-        x => Attempt.successful(x.toEpochSecond(ZoneOffset.UTC))
-    )
-
-    def macCodec[T](macInstance: Mac, suffix: BitVector)(implicit codec: Codec[T]) =
+    def macCodec[T](macInstance: Mac, suffix: BitVector)(implicit codec: Codec[T]): Codec[T] =
         filtered(codec, new
                         Codec[BitVector] {
             override def encode(value: BitVector): Attempt[BitVector] = {
@@ -64,7 +61,7 @@ package object codecs {
             private val macLength = macInstance.getMacLength
 
             override def sizeBound: SizeBound =
-                codec.sizeBound + SizeBound.exact(macLength)
+                codec.sizeBound + SizeBound.exact(macLength * 8)
 
             override def decode(bits: BitVector)
             : Attempt[DecodeResult[BitVector]] = {
@@ -91,5 +88,51 @@ package object codecs {
                 }
             }
         })
+
+    def knownSizeSeq[T](size: Int, codec: Codec[T]): Codec[Seq[T]] = new
+                    Codec[Seq[T]] {
+        require(codec.sizeBound.exact.isDefined)
+
+        override def encode(value: Seq[T]): Attempt[BitVector] = {
+            val attempt = value.map(codec.encode)
+                    .fold(Attempt.successful(BitVector.empty)) {
+                        case (Successful(bits1), Successful(bits2)) =>
+                            Attempt.successful(bits1 ++ bits2)
+                        case (Failure(err1), Failure(err2)) =>
+                            Attempt.failure(Err(s"$err1\n$err2"))
+                        case (Failure(err), _) =>
+                            Attempt.failure(err)
+                        case (_, Failure(err)) =>
+                            Attempt.failure(err)
+                    }
+
+            attempt
+        }
+
+        override def sizeBound: SizeBound = codec.sizeBound * size
+
+        override def decode(bits: BitVector): Attempt[DecodeResult[Seq[T]]] = {
+            val elementSize = codec.sizeBound.exact.get
+            val attempts = bits
+                    .take(elementSize * size)
+                    .grouped(elementSize)
+                    .zipWithIndex
+                    .map { case (elemBits, i) => (codec.decode(elemBits), i) }
+
+            val errors = attempts.collect {
+                case (Failure(err), i) =>
+                    s"$i -> $err"
+            }
+
+            if (errors.isEmpty) {
+                Attempt.successful(DecodeResult(
+                    attempts.map(x => x._1.require.value),
+                    bits.drop(elementSize * size)
+                ))
+            } else {
+                Attempt.failure(Err(errors.mkString("\n")))
+            }
+        }
+    }
 }
 
