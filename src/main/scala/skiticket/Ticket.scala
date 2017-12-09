@@ -7,6 +7,7 @@ import javax.crypto.spec.SecretKeySpec
 import scodec._
 import scodec.codecs._
 import skiticket.Ticket.Subscription
+import skiticket.nfc.NfcConstants
 import skiticket.utils.codecs._
 
 object Errors extends Enumeration {
@@ -17,9 +18,10 @@ object Errors extends Enumeration {
     val NoRidesOrSubscription = Val("No rides or subscriptions left")
 }
 
-case class Ticket(var ridesRemaining: Int,
-                  var subscriptions: Seq[Subscription],
-                  var lastValidation: LocalDateTime) {
+case class Ticket(uid: Long,
+                  ridesRemaining: Int,
+                  subscriptions: Seq[Subscription],
+                  lastValidation: LocalDateTime = Ticket.BaseDate) {
     require(ridesRemaining >= 0, "Negative number of rides")
     require(ridesRemaining <= Ticket.MaxNumberOfRides, "Too many rides")
 
@@ -55,7 +57,10 @@ case class Ticket(var ridesRemaining: Int,
                 i
         }
         require(expiredIndex.isDefined)
-        copy(subscriptions = subscriptions.updated(expiredIndex.get, Some(Right(days))))
+        val newSubscriptions =
+            subscriptions.updated(expiredIndex.get, Some(Right(days)))
+
+        copy(subscriptions = newSubscriptions)
     }
 
     def validate(ignorePassBack: Boolean = false): Either[Errors.Value, Ticket] = {
@@ -94,6 +99,9 @@ case class Ticket(var ridesRemaining: Int,
                     .orElse(validSubscription)
                     .orElse(ridesBased)
                     .map(t => t.copy(lastValidation = LocalDateTime.now()))
+                    .map(t => {
+                        t
+                    })
                     .toRight(Errors.NoRidesOrSubscription)
         }
     }
@@ -102,36 +110,43 @@ case class Ticket(var ridesRemaining: Int,
 object Ticket {
     type Subscription = Option[Either[LocalDateTime, Int]]
 
+    val MaxNumberOfSubscriptions = 3
     val MaxNumberOfRides = 100
     val MaxSubscriptionLength = 365
     val AntiPassBackTimer: Duration = Duration.ofMinutes(1)
 
     val BaseDate: LocalDateTime = LocalDate.of(2017, 12, 3).atStartOfDay()
 
-    def codec(keyBytes: Seq[Byte], counter: Int): Codec[Ticket] = {
-        val subscriptionHoursCodec = uintL(32)
+    private val subscriptionHoursCodec: Codec[Int] = uintL(31)
+    private val dateTimeCodec =
+        offsetDateTimeCodec(BaseDate, subscriptionHoursCodec)
 
-        val dateTimeCodec = offsetDateTimeCodec(BaseDate, subscriptionHoursCodec)
-
+    def codec(uid: Long, keyBytes: Seq[Byte], counter: Int): Codec[Ticket] = {
         val macAlgorithm = "HmacMD5"
         val key = new SecretKeySpec(keyBytes.toArray, macAlgorithm)
         val macInstance = Mac.getInstance(macAlgorithm)
         macInstance.init(key)
 
-        macCodec(macInstance, uint32L.encode(counter).require) {
-            ("ridesRemaining" | uint16L) ::
-                    ("subscriptions" | knownSizeSeq(
-                        MaxNumberOfSubscriptions,
-                        presentIfNonZero(
-                            either(
-                                bool(1),
-                                dateTimeCodec,
-                                subscriptionHoursCodec
-                            ),
-                            Right(0)
-                        )
-                    )) ::
-                    ("lastValidation" | dateTimeCodec)
-        }.as[Ticket]
+        val suffix = uint32L.encode(counter).require
+
+        macCodec(macInstance, suffix)(("uid" | provide(uid)) :: dataCodec).as[Ticket]
     }
+
+    val dataCodec = ("ridesRemaining" | uint16L) ::
+            ("subscriptions" | knownSizeSeq(
+                MaxNumberOfSubscriptions,
+                presentIfNonZero(
+                    either(
+                        bool(1),
+                        dateTimeCodec,
+                        subscriptionHoursCodec
+                    ),
+                    Right(0)
+                )
+            )) ::
+            ("lastValidation" | dateTimeCodec)
+
+    val size: Int = codec(0, Array[Byte](), 0).sizeBound.exact.get.toInt
+    val sizeInPages: Int = ((size + 7) / 8 + NfcConstants.PageSize - 1) / NfcConstants.PageSize
 }
+

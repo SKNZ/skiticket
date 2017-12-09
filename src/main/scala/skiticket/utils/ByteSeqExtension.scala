@@ -20,9 +20,7 @@ object ByteSeqExtension {
             require(newBytes.length <= me.length, s"Source was ${me.length} " +
                     s"and new was ${newBytes.length}")
 
-            for (i <- me.indices) {
-                me.update(i, newBytes(i))
-            }
+            newBytes.indices.foreach(i => me.update(i, newBytes(i)))
         }
     }
 

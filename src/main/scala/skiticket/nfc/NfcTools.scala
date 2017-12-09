@@ -11,9 +11,14 @@ import ultralight.{CardReader, UltralightCommands, UltralightUtilities}
 
 import scala.collection.mutable.ArrayBuffer
 
+case class NfcException(s: String) extends Exception(s)
+
 case class NfcTools() {
     val cardReader = new CardReader(System.out, null)
-    assert(cardReader.initReader())
+
+    if (!cardReader.initReader()) {
+        throw NfcException("Can't init reader")
+    }
 
     private var _utils: UltralightUtilities = _
 
@@ -24,13 +29,17 @@ case class NfcTools() {
             ArrayBuffer(utils.readPage(i):_*)
         } {
             case (i, buffer) =>
-                assert(utils.writePages(buffer.toArray, 0, i, 1))
+                if (!utils.writePages(buffer.toArray, 0, i, 1)) {
+                    throw NfcException("Can't write")
+                }
         }
 
     reconnect()
 
     def reconnect(): Unit = {
-        assert(cardReader.initCard())
+        if (!cardReader.initCard()) {
+            throw NfcException("Can't get card")
+        }
 
         val commands = new UltralightCommands(cardReader)
         _utils = new UltralightUtilities(commands, System.out)
@@ -50,7 +59,9 @@ case class NfcTools() {
 
             if (alreadyTriedAuth) {
                 println(s"NOTE: have to reconnect first.")
-                assert(cardReader.initCard())
+                if (!cardReader.initCard()) {
+                    throw NfcException("Cant' get card")
+                }
             } else {
                 alreadyTriedAuth = true
             }
@@ -78,7 +89,14 @@ case class NfcTools() {
             1
         }).require.bytes.toArray
 
-        assert(utils.writePages(buffer, 0, NfcTicket.CounterPage, 1))
+        if (!utils.writePages(buffer, 0, NfcTicket.CounterPage, 1)) {
+            throw NfcException("Can't write to monotonic counter")
+        }
     }
+
+    def disconnect(): Unit = {
+        cardReader.disconnect()
+    }
+
 }
 

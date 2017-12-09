@@ -5,8 +5,7 @@ import java.time.temporal.ChronoUnit
 import javax.crypto.Mac
 
 import scodec.Attempt.{Failure, Successful}
-import scodec.bits.BitVector
-import scodec.codecs._
+import scodec.bits.{BitVector, ByteVector}
 import scodec.{Attempt, Codec, DecodeResult, Err, SizeBound}
 import skiticket.utils.ByteSeqExtension._
 
@@ -42,52 +41,61 @@ package object codecs {
             num =>
                 Attempt.successful(baseDate.plusSeconds(integral.toLong(num))),
             { dateTime =>
+                if (dateTime.isBefore(baseDate)) {
+                    throw new IllegalArgumentException("Need datetime before " +
+                            "base date")
+                }
                 val seconds = ChronoUnit.SECONDS.between(baseDate, dateTime)
                 Attempt.successful(integral.fromInt(seconds.toInt))
             })
 
-    def macCodec[T](macInstance: Mac, suffix: BitVector)(implicit codec: Codec[T]): Codec[T] =
-        filtered(codec, new
-                        Codec[BitVector] {
-            override def encode(value: BitVector): Attempt[BitVector] = {
-                val bytes = value.toByteArray
-
-                macInstance.update(bytes)
-                macInstance.update(suffix.toByteArray)
-                val mac = macInstance.doFinal()
-                Attempt.successful(value ++ BitVector(mac))
-            }
+    def macCodec[T](macInstance: Mac, suffix: BitVector)(implicit valueCodec: Codec[T]): Codec[T] =
+        new Codec[T] {
+            require(valueCodec.sizeBound.exact.isDefined)
 
             private val macLength = macInstance.getMacLength
 
-            override def sizeBound: SizeBound =
-                codec.sizeBound + SizeBound.exact(macLength * 8)
+            override def encode(value: T): Attempt[BitVector] = {
+                valueCodec.encode(value) match {
+                    case Successful(valueBits) =>
+                        macInstance.update(valueBits.toByteArray)
+                        macInstance.update(suffix.toByteArray)
+                        val mac = BitVector.view(macInstance.doFinal())
 
-            override def decode(bits: BitVector)
-            : Attempt[DecodeResult[BitVector]] = {
-                val bytes = bits.bytes
-                val (dataBytes, macBytes) = bytes.splitAt(bytes.size - macLength)
-                assert(macBytes.length == macLength)
+                        assert(mac.size / 8 == macLength,
+                            s"Is ${mac.size / 8}, should be $macLength")
 
-                macInstance.update(dataBytes.toArray)
-                macInstance.update(suffix.toByteArray)
-                val macComputed = macInstance.doFinal()
-
-                if (macComputed sameElements macBytes.toArray) {
-                    Attempt.successful(
-                        DecodeResult(
-                            dataBytes.toBitVector,
-                            BitVector.empty
-                        )
-                    )
-                } else {
-                    Attempt.failure(Err(s"MAC did not match (expected ${
-                        macBytes
-                                .toHex
-                    }, got ${macComputed.toSeq.toHexString}"))
+                        Attempt.successful(valueBits ++ mac)
+                    case attempt => attempt
                 }
             }
-        })
+
+            override def sizeBound: SizeBound =
+                valueCodec.sizeBound + SizeBound.exact(macLength * 8)
+
+            override def decode(allBits: BitVector): Attempt[DecodeResult[T]] = {
+                valueCodec.decode(allBits) match {
+                    case Successful(DecodeResult(_, BitVector.empty)) =>
+                        Attempt.failure(Err("Missing MAC bits"))
+                    case Successful(DecodeResult(value, valueRemainder)) =>
+                        val (macExpected, remainder) = valueRemainder.bytes.splitAt(macLength)
+
+                        val valueBits = allBits.dropRight(valueRemainder.length)
+                        macInstance.update(valueBits.toByteArray)
+                        macInstance.update(suffix.toByteArray)
+                        val macComputed = ByteVector.view(macInstance.doFinal())
+
+                        if (macComputed == macExpected) {
+                            Attempt.successful(DecodeResult(value, remainder.bits))
+                        } else {
+                            Attempt.failure(Err(s"MAC did not match (expected" +
+                                    s" ${macExpected.toHex}, got " +
+                                    s"${macComputed.toHex}"))
+                        }
+                    case e@Failure(_) => e
+                }
+            }
+        }
 
     def knownSizeSeq[T](size: Int, codec: Codec[T]): Codec[Seq[T]] = new
                     Codec[Seq[T]] {

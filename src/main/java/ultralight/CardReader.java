@@ -91,6 +91,18 @@ public class CardReader {
         return true;
     }
 
+    public void disconnect() throws CardException {
+        if (terminal == null) {
+            throw new CardException("Bug: must initialize reader before card.");
+        }
+
+        if (card != null) {
+            card.disconnect(true);
+        }
+        card = null;
+        channel = null;
+    }
+
     /**
      * Initialize connection to the smart card.
      *
@@ -125,6 +137,10 @@ public class CardReader {
         }
 
         byte[] atr = card.getATR().getBytes();
+//        System.out.println("WOLOLOLOLO");
+//        System.out.println(javax.xml.bind.DatatypeConverter.printHexBinary(ultralightAtr));
+//        System.out.println(javax.xml.bind.DatatypeConverter.printHexBinary(atr));
+
         boolean goodAtr = true;
         if (atr.length != ultralightAtr.length) {
             goodAtr = false;

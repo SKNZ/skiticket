@@ -11,6 +11,7 @@ object Main extends App {
     if (true) {
         nfcTicket.format()
     }
+    assert(nfcTicket.isSkiTicket)
 
     var ticket = nfcTicket.readData()
     println(ticket)
@@ -30,3 +31,4 @@ object Main extends App {
 
 //    finalTicket.foreach(t => nfcTicket.writeData(t))
 }
+

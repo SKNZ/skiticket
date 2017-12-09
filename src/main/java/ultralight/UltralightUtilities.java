@@ -1,5 +1,7 @@
 package ultralight;
 
+import skiticket.nfc.NfcException;
+
 import javax.smartcardio.CardException;
 
 /**
@@ -39,10 +41,10 @@ public class UltralightUtilities {
 		return true;
 	}
 
-	public byte[] readPage(int page) throws CardException {
+	public byte[] readPage(int page) throws CardException, NfcException {
 	    byte[] buffer = new byte[4];
 		if ((!readPages(page, 1, buffer, 0))) {
-			throw new AssertionError();
+			throw new NfcException("Can't read page");
 		}
 	    return buffer;
 	}

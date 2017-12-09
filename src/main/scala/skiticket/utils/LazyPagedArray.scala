@@ -1,6 +1,7 @@
 package skiticket.utils
 
 import scodec.bits.ByteVector
+import skiticket.nfc.NfcException
 
 import scala.collection.mutable
 import scala.collection.mutable.ArrayBuffer
@@ -74,7 +75,9 @@ case class LazyPagedArray(size: Int, pageSize: Int)
             loadedPages += currentPageNumber
         }
 
-        assert(pagesToBeLoaded.subsetOf(loadedPages))
+        if (!pagesToBeLoaded.subsetOf(loadedPages)) {
+            throw new RuntimeException("Missing pages in loaded set")
+        }
     }
 }
 

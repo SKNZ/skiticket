@@ -1,32 +1,24 @@
 package skiticket
 
 import java.security.MessageDigest
-import java.time._
 
 import scodec.bits._
-import skiticket.nfc.{NfcConstants, NfcTools}
+import scodec.codecs._
+import skiticket.nfc.{NfcConstants, NfcException, NfcTools}
 import skiticket.utils.ByteSeqExtension._
 
 case class NfcTicket(nfc: NfcTools) {
-    val Uid: Seq[Byte] = {
-        val key = nfc.memory(0, 2)
-        println(s"UID: ${key.toHexString}")
-        key
+    val UidBytes: Seq[Byte] = {
+        val uidBytes = nfc.memory(0, 2)
+        println(s"UIDB: ${uidBytes.toHexString}")
+        uidBytes
     }
 
-    private lazy val authenticationKey: Seq[Byte] = {
-        val sha256 = MessageDigest.getInstance("SHA-256")
-        val uidDigest = sha256.digest(Uid.toArray)
-        val masterKeyDigest = sha256.digest(NfcTicket.MasterKey.getBytes())
-
-        sha256.update(uidDigest)
-        val key = sha256.digest(masterKeyDigest).toSeq
-
-        key
+    lazy val Uid: Long = {
+        val uid = int64.decode(BitVector.view(UidBytes.toArray)).require.value
+        println(s"UID: ${java.lang.Long.toUnsignedString(uid)}")
+        uid
     }
-
-    private lazy val desAuthenticationKey: Seq[Byte] =
-        authenticationKey.slice(0, NfcConstants.KeySize)
 
     def isSkiTicket: Boolean = {
         nfc.memory(NfcTicket.TagPage) == NfcTicket.TagBytes
@@ -37,61 +29,72 @@ case class NfcTicket(nfc: NfcTools) {
     }
 
     private def readData(currentCounter: Int): Ticket = {
-        val codec = Ticket.codec(authenticationKey, currentCounter)
-        val sizeInPages = (codec.sizeBound.lowerBound.toInt / 8 + NfcConstants .PageSize - 1) / NfcConstants.PageSize
+        val codec =
+            Ticket.codec(Uid, NfcTicket.authenticationKey(UidBytes), currentCounter)
+
+        val size = (codec.sizeBound.exact.get.toInt + 7) / 8
+
+        val sizeInPages = (size + NfcConstants.PageSize - 1) / NfcConstants.PageSize
+
         val startPage = NfcTicket.DataPage + sizeInPages * currentCounter % 2
 
-        val bytes = nfc.memory(startPage, sizeInPages)
+        val bytes = nfc.memory(startPage, sizeInPages).slice(0, size)
         val data = codec.decode(BitVector.view(bytes.toArray)).require.value
 
         data
     }
 
-    def writeData(data: Ticket): Unit = {
-        writeData(data, nfc.getCounter)
-    }
+    private def writeData(data: Ticket, counter: Int): Unit = {
+        val nextCounter = counter + 1
 
-    private def writeData(data: Ticket, currentCounter: Int): Unit = {
-        val nextCounter = currentCounter + 1
+        val codec = Ticket.codec(Uid, authenticationKey, nextCounter)
 
-        val codec = Ticket.codec(authenticationKey, nextCounter)
+        val bits = codec.encode(data).require
 
-        val bytes = codec.encode(data).require.toByteArray
+        assert(Ticket.size == bits.length, s"Is size ${bits.size}, should be " +
+                s"${Ticket.size}")
 
-        val sizeInPages = (codec.sizeBound.lowerBound.toInt / 8 + NfcConstants .PageSize - 1) / NfcConstants.PageSize
-        assert(codec.sizeBound.lowerBound.toInt / 8 == bytes.length)
-        val startPage = NfcTicket.DataPage + sizeInPages * nextCounter % 2
+        val startPage = NfcTicket.startPage(nextCounter)
 
-        nfc.memory(startPage, sizeInPages).update(bytes.toSeq)
+        nfc.memory(startPage, Ticket.sizeInPages).update(bits.toByteArray.toSeq)
         nfc.save()
 
         val writtenData = readData(nextCounter)
-        assert(data == writtenData)
+        check(data == writtenData, s"Mismatch between written and expect " +
+                s"\nR $data\nW $writtenData\n")
 
         nfc.incrementCounter()
     }
 
+    def check(cond: Boolean, s: String): Unit = {
+        if (!cond) {
+            throw NfcException(s)
+        }
+    }
+
     def format(): Unit = {
         println("Card needs formatting")
-        assert(nfc.utils.eraseMemory())
+        check(nfc.utils.eraseMemory(), "Can't erase memory")
 
-        assert(nfc.utils.setAuth0(NfcTicket.TagPage))
-        assert(nfc.utils.setAuth1(true))
+        check(nfc.utils.setAuth0(NfcTicket.TagPage), "Can't set auth0")
+        check(nfc.utils.setAuth1(true), "Can't set auth1")
 
         println("Writing application tag.")
         nfc.memory(NfcTicket.TagPage, 1).update(NfcTicket.TagBytes)
 
         nfc.save()
 
-        assert(nfc.utils.changeKey(desAuthenticationKey.toArray))
+        check(nfc.utils.changeKey(desAuthenticationKey.toArray), "Can't " +
+                "change key")
         println("3DES key changed.")
 
         writeData(
             Ticket(
+                Uid,
                 0,
-                List[Ticket.Subscription](None, None, None),
-                LocalDateTime.ofEpochSecond(0, 0, ZoneOffset.UTC)
-            )
+                List[Ticket.Subscription](None, None, None)
+            ),
+            nfc.getCounter
         )
     }
 
@@ -99,7 +102,7 @@ case class NfcTicket(nfc: NfcTools) {
         if (!nfc.authenticate(NfcConstants.DefaultKey)) {
             println("3DES authentication with default key failed.")
 
-            assert(nfc.authenticate(desAuthenticationKey),
+            check(nfc.authenticate(desAuthenticationKey),
                 "3DES authentication with UID key failed.")
         }
 
@@ -117,5 +120,22 @@ object NfcTicket {
     val MasterKey = "9gWwas51JqcG1zoRBgErqRRLdvIOkxS3H5WNO3wM6uRj982unYOxxm2eh3Vwvs1aOZM5kS2yKOAJKwPvw4zYjBu0krh5fMTLMdPq"
 
     val TagBytes: Seq[Byte] = "SKI0".getBytes()
+
+    def startPage(counter: Int): Int =
+        NfcTicket.DataPage + Ticket.sizeInPages * counter % 2
+
+    private def authenticationKey(uidBytes: Seq[Byte]): Seq[Byte] = {
+        val sha256 = MessageDigest.getInstance("SHA-256")
+        val uidDigest = sha256.digest(uidBytes.toArray)
+        val masterKeyDigest = sha256.digest(NfcTicket.MasterKey.getBytes())
+
+        sha256.update(uidDigest)
+        val key = sha256.digest(masterKeyDigest).toSeq
+
+        key
+    }
+
+    private def desAuthenticationKey(uidBytes: Seq[Byte]): Seq[Byte] =
+        authenticationKey(uidBytes).slice(0, NfcConstants.KeySize)
 }
 
