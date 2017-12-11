@@ -1,7 +1,8 @@
 package skiticket.data
 
-import java.time.{Instant, LocalDateTime}
+import java.time.LocalDateTime
 import java.util
+import java.util.concurrent.atomic.AtomicInteger
 
 import scalikejdbc._
 
@@ -10,6 +11,11 @@ import scala.collection.JavaConverters._
 case class LogEntry(uid: Long, counter: Int, time: LocalDateTime = LocalDateTime.now())
 
 object ValidationLogger {
+    GlobalSettings.loggingSQLAndTime = LoggingSQLAndTimeSettings(
+        enabled = false,
+        singleLineMode = true,
+        printUnprocessedStackTrace = false
+    )
     Class.forName("org.h2.Driver")
     ConnectionPool.singleton("jdbc:h2:mem:hello", "user", "pass")
 
@@ -22,26 +28,32 @@ object ValidationLogger {
     private val receiverThread: Thread = new Thread(() => {
         val items = new util.ArrayList[LogEntry]()
         while (!Thread.currentThread().isInterrupted) {
+            //            println("Validation logger flush")
             passagesQueue.drainTo(items)
 
             val queryParams = items.asScala.map(x => Seq(x.uid, x.counter, x
                     .time.toString))
 
             sql"insert into passages values (?, ?, ?)"
-                    .batch(queryParams:_*).apply()
+                    .batch(queryParams: _*).apply()
 
             val blackListed =
                 sql"""
-select p1.id from passages p1
+select p1.id, p1.counter as p1c, p1.time as p1t, p2.counter as p2c, p2.time as p2t
+ from passages p1
  join passages p2 on p1.id = p2.id and p1.counter <= p2.counter
  where p1.time > p2.time
-            """.map(rs => rs.long(1)).list.apply
+            """.map(rs => rs.toMap()).list.apply
 
-            blacklist ++= blackListed
+            if (blackListed.nonEmpty) {
+                println(s"Found fraud, will blacklist because: $blackListed")
+
+                blacklist ++= blackListed.map(x => x("id").toString.toLong)
+            }
 
             items.clear()
             try {
-                Thread.sleep(500)
+                Thread.sleep(5000)
             } catch {
                 case _: InterruptedException =>
             }
@@ -73,12 +85,18 @@ create table passages (
 
     private val blacklist = scala.collection.parallel.mutable.ParHashSet[Long]()
 
-    def addPassage(entry: LogEntry) = {
-        passagesQueue.add(entry)
+    private val n: AtomicInteger = new AtomicInteger(0)
+    def addPassage(entry: LogEntry): Boolean = {
+        val e = entry.copy(time = entry.time.withNano(n.getAndIncrement()))
+        passagesQueue.add(e)
     }
 
     def isBlacklisted(uid: Long): Boolean = {
         blacklist.contains(uid)
+    }
+
+    def blackList(uid: Long): Unit = {
+        blacklist += uid
     }
 }
 

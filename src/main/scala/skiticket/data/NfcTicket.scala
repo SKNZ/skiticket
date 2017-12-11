@@ -37,18 +37,18 @@ case class NfcTicket(nfc: NfcTools) {
 
         val size = (codec.sizeBound.exact.get.toInt + 7) / 8
 
-        val sizeInPages = (size + NfcConstants.PageSize - 1) / NfcConstants.PageSize
+        val startPage = NfcTicket.startPage(currentCounter)
 
-        val startPage = NfcTicket.DataPage + sizeInPages * currentCounter % 2
+        val bytes = nfc.memory(startPage, Ticket.sizeInPages).slice(0, size)
 
-        val bytes = nfc.memory(startPage, sizeInPages).slice(0, size)
         val data = codec.decode(BitVector.view(bytes.toArray)).require.value
 
         data
     }
 
     def writeData(data: Ticket): Unit = {
-        val nextCounter = data.counter + 1
+        val currentCounter = nfc.getCounter
+        val nextCounter = currentCounter + 1
 
         val codec = Ticket.fullCodec(this, nextCounter)
 
@@ -58,6 +58,7 @@ case class NfcTicket(nfc: NfcTools) {
                 s"${Ticket.size}")
 
         val startPage = NfcTicket.startPage(nextCounter)
+        println(s"Writing at page $startPage.")
 
         nfc.memory(startPage, Ticket.sizeInPages).update(bits.toByteArray.toSeq)
         nfc.save()
@@ -71,8 +72,15 @@ case class NfcTicket(nfc: NfcTools) {
                    |""".stripMargin)
         }
 
+        if (NfcTicket.TearingTest) {
+            println(s"${Console.BOLD}Tearing test sleep now (1.0s)${Console.RESET}")
+            Thread.sleep(1000)
+        }
+
         nfc.incrementCounter()
         nfc.save()
+
+        ValidationLogger.addPassage(LogEntry(uid, currentCounter))
     }
 
     def check(cond: Boolean, s: String): Unit = {
@@ -102,7 +110,6 @@ case class NfcTicket(nfc: NfcTools) {
         writeData(
             Ticket(
                 uid,
-                nfc.getCounter,
                 0,
                 List[Ticket.Subscription](None, None, None)
             )
@@ -122,6 +129,8 @@ case class NfcTicket(nfc: NfcTools) {
 }
 
 object NfcTicket {
+    var TearingTest = false
+
     val TagPage = 4
 
     val DataPage = 5
@@ -133,7 +142,7 @@ object NfcTicket {
     val TagBytes: Seq[Byte] = "SKI0".getBytes()
 
     def startPage(counter: Int): Int =
-        NfcTicket.DataPage + Ticket.sizeInPages * counter % 2
+        NfcTicket.DataPage + Ticket.sizeInPages * (counter % 2)
 
     private def authenticationKey(uidBytes: Seq[Byte]): Seq[Byte] = {
         val sha256 = MessageDigest.getInstance("SHA-256")

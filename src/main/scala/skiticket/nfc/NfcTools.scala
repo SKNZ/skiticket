@@ -72,15 +72,20 @@ case class NfcTools() {
         }
     }
 
+    private var counterCache: Option[Int] = None
     def getCounter: Int = {
-        val page = utils.readPage(NfcTicket.CounterPage)
+        if (counterCache.isEmpty) {
+            val page = utils.readPage(NfcTicket.CounterPage)
 
-        val c = uint32L.decode(BitVector(page))
-                .require
-                .value
-                .toInt
-        println(s"COUNTER $c")
-        c
+            counterCache = Some(uint32L.decode(BitVector(page))
+                    .require
+                    .value
+                    .toInt)
+
+            println(s"Read monotonic counter ${counterCache.get}.")
+        }
+
+        counterCache.get
     }
 
     def incrementCounter(): Unit = {
@@ -94,10 +99,15 @@ case class NfcTools() {
         if (!utils.writePages(buffer, 0, NfcTicket.CounterPage, 1)) {
             throw NfcException("Can't write to monotonic counter")
         }
+        counterCache = None
     }
 
     def disconnect(): Unit = {
         cardReader.disconnect()
+    }
+
+    def waitRemoved(): Unit = {
+        cardReader.waitRemoved()
     }
 
 }

@@ -103,7 +103,7 @@ class NfcTicketTest extends fixture.FlatSpec with Matchers {
         f(authenticateFixture, formatFixture)
 
         val ticket = f.ticket.readData()
-        val refTicket = Ticket(ticket.uid, ticket.counter, 0, Seq(None, None, None))
+        val refTicket = Ticket(ticket.uid, 0, Seq(None, None, None))
 
         assert(ticket === refTicket)
     }
@@ -130,7 +130,7 @@ class NfcTicketTest extends fixture.FlatSpec with Matchers {
         f(authenticateFixture, formatFixture)
 
         val g = Generic[Ticket]
-        val hList = g.to(Ticket(0, 0, 100, Seq(Some(Right(30)), None, None))).drop(2)
+        val hList = g.to(Ticket(0, 100, Seq(Some(Right(30)), None, None))).drop(1)
         val bytes = Ticket.dataCodec.encode(hList).require.toByteArray.toSeq
 
         val counter = f.tools.getCounter
@@ -245,13 +245,11 @@ class NfcTicketTest extends fixture.FlatSpec with Matchers {
         intercept[IllegalArgumentException](Ticket(
             0,
             0,
-            0,
             Seq(Some(Left(LocalDateTime.now().withNano(0))), None, None),
             LocalDateTime.now().withNano(1)
         ))
 
         intercept[IllegalArgumentException](Ticket(
-            0,
             0,
             0,
             Seq(Some(Left(LocalDateTime.now())), None, None), LocalDateTime.now().withNano(0)
@@ -271,7 +269,7 @@ class NfcTicketTest extends fixture.FlatSpec with Matchers {
         assert(ValidationLogger.isBlacklisted(1))
         assert(!ValidationLogger.isBlacklisted(2))
 
-        val ticket = Ticket(1, 1, 0, Seq(None, None, None))
+        val ticket = Ticket(1, 0, Seq(None, None, None))
         val validated = ticket.validate()
         assert(validated.left.get == Errors.BlackListed)
     }

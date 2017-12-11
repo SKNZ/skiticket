@@ -97,6 +97,7 @@ public class CardReader {
         }
 
         if (card != null) {
+            card.endExclusive();
             card.disconnect(true);
         }
         card = null;
@@ -113,12 +114,8 @@ public class CardReader {
             throw new CardException("Bug: must initialize reader before card.");
         }
 
-        if (card != null) {
-            card.disconnect(true);
-        }
+        disconnect();
 
-        card = null;
-        channel = null;
         try {
             userMessage("Waiting for MIFARE Ultralight card... ");
             terminal.waitForCardPresent(10000);
@@ -130,6 +127,13 @@ public class CardReader {
             }
             userMessage("Found a card.");
             card = terminal.connect("T=1");
+            try {
+                card.beginExclusive();
+            } catch (CardException e) {
+                userMessage("Failed to acquire exclusive access to card, " +
+                        "perhaps another instance of this app is running " +
+                        "on this computer ?");
+            }
             channel = card.getBasicChannel();
         } catch (Exception e) {
             userMessage("Unable to connect to the card: " + e.toString());
@@ -482,6 +486,10 @@ public class CardReader {
             return String.format("Wrong Le, 0x%02X is the correct value", sw2);
         }
         return String.format("Undefined error code.", sw1, sw2);
+    }
+
+    public void waitRemoved() throws CardException {
+        terminal.waitForCardAbsent(0);
     }
 
 }

@@ -20,7 +20,6 @@ object Errors extends Enumeration {
 }
 
 case class Ticket(uid: Long,
-                  counter: Int,
                   ridesRemaining: Int,
                   subscriptions: Seq[Subscription],
                   lastValidation: LocalDateTime = Ticket.BaseDate) {
@@ -54,17 +53,19 @@ case class Ticket(uid: Long,
     }
 
     def issueSubscription(days: Int): Ticket = {
-        val expiredIndex = subscriptions.zipWithIndex.collectFirst {
-            case (Some(Left(expiry)), i) if expiry.isBefore(LocalDateTime.now()) =>
-                i
-            case (None, i) =>
-                i
-        }
-        require(expiredIndex.isDefined)
-        val newSubscriptions =
-            subscriptions.updated(expiredIndex.get, Some(Right(days)))
+        if (days != 0) {
+            val expiredIndex = subscriptions.zipWithIndex.collectFirst {
+                case (Some(Left(expiry)), i) if expiry.isBefore(LocalDateTime.now()) =>
+                    i
+                case (None, i) =>
+                    i
+            }
+            require(expiredIndex.isDefined)
+            val newSubscriptions =
+                subscriptions.updated(expiredIndex.get, Some(Right(days)))
 
-        copy(subscriptions = newSubscriptions)
+            copy(subscriptions = newSubscriptions)
+        } else this
     }
 
     def validate(ignorePassBack: Boolean = false): Either[Errors.Value, Ticket] = {
@@ -106,32 +107,20 @@ case class Ticket(uid: Long,
                     .orElse(validSubscription)
                     .orElse(ridesBased)
                     .map(t => t.copy(lastValidation = LocalDateTime.now().withNano(0)))
-                    .map(t => {
-                        ValidationLogger.addPassage(LogEntry(uid, counter))
-                        t
-                    })
                     .toRight(Errors.NoRidesOrSubscription)
         }
     }
 
-    override def equals(o: scala.Any): Boolean = o match {
-        case Ticket(this.uid, _, this.ridesRemaining, this.subscriptions, this.lastValidation) =>
-            true
-        case _ => false
+    override def toString: String = {
+        s"""Ticket{
+    UID: $uid
+    Rides remaining: $ridesRemaining
+    Sub0: ${subscriptions(0)}
+    Sub1: ${subscriptions(1)}
+    Sub2: ${subscriptions(2)}
+    Last validation: $lastValidation
+}"""
     }
-
-//    override def hashCode(): Int = {
-//        val prime = 31
-//        var result = 1
-//
-//        result = prime * result + uid.hashCode()
-//        result = prime * result + ridesRemaining.hashCode()
-//        result = prime * result + subscriptions.hashCode()
-//        result = prime * result + subscriptions.hashCode()
-//        result = prime * result + lastValidation.hashCode()
-//
-//        result
-//    }
 }
 
 object Ticket {
@@ -164,9 +153,7 @@ object Ticket {
         val suffix = uint32L.encode(counter).require
 
         macCodec(macInstance, suffix)(
-            ("uid" | provide(uid)) ::
-                    ("counter" | provide(counter)) ::
-                    dataCodec
+            ("uid" | provide(uid)) :: dataCodec
         ).as[Ticket]
     }
 

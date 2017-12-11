@@ -5,5 +5,9 @@
       <option name="implicitConversions" value="true" />
     </profile>
     <profile name="sbt 2" modules="root" />
+    <profile name="sbt 3" modules="f644a9df41279d84228c-root,onions,scurses">
+      <option name="uncheckedWarnings" value="true" />
+      <option name="featureWarnings" value="true" />
+    </profile>
   </component>
 </project>

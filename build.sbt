@@ -4,7 +4,7 @@ lazy val root = (project in file(".")).
         settings(
             inThisBuild(List(
                 organization := "net.sec.nfc",
-                scalaVersion := "2.12.3",
+                scalaVersion := "2.12.4",
                 version := "0.1.0-SNAPSHOT",
                 parallelExecution := false
             )),
@@ -19,3 +19,5 @@ lazy val root = (project in file(".")).
                 "ch.qos.logback" % "logback-classic" % "1.2.3"
             )
         )
+
+fork in run := true
