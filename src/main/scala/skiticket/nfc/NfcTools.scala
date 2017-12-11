@@ -4,7 +4,7 @@ import javax.smartcardio.CardException
 
 import scodec.bits.BitVector
 import scodec.codecs._
-import skiticket.NfcTicket
+import skiticket.data.NfcTicket
 import skiticket.utils.ByteSeqExtension._
 import skiticket.utils.LazyPagedArray
 import ultralight.{CardReader, UltralightCommands, UltralightUtilities}
@@ -75,15 +75,17 @@ case class NfcTools() {
     def getCounter: Int = {
         val page = utils.readPage(NfcTicket.CounterPage)
 
-        uint32.decode(BitVector(page))
+        val c = uint32L.decode(BitVector(page))
                 .require
                 .value
                 .toInt
+        println(s"COUNTER $c")
+        c
     }
 
     def incrementCounter(): Unit = {
         // Safe mode can't handle muh monotonic counter
-        val buffer = uint32.encode(if (UltralightCommands.safe) {
+        val buffer = uint32L.encode(if (UltralightCommands.safe) {
             getCounter + 1
         } else {
             1

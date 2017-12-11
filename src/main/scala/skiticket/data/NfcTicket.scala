@@ -1,4 +1,4 @@
-package skiticket
+package skiticket.data
 
 import java.security.MessageDigest
 
@@ -8,17 +8,21 @@ import skiticket.nfc.{NfcConstants, NfcException, NfcTools}
 import skiticket.utils.ByteSeqExtension._
 
 case class NfcTicket(nfc: NfcTools) {
-    val UidBytes: Seq[Byte] = {
+    val uidBytes: Seq[Byte] = {
         val uidBytes = nfc.memory(0, 2)
         println(s"UIDB: ${uidBytes.toHexString}")
         uidBytes
     }
 
-    lazy val Uid: Long = {
-        val uid = int64.decode(BitVector.view(UidBytes.toArray)).require.value
+    val uid: Long = {
+        val uid = int64.decode(BitVector.view(uidBytes.toArray)).require.value
         println(s"UID: ${java.lang.Long.toUnsignedString(uid)}")
         uid
     }
+
+    val desAuthenticationKey = NfcTicket.desAuthenticationKey(uidBytes)
+
+    val authenticationKey = NfcTicket.authenticationKey(uidBytes)
 
     def isSkiTicket: Boolean = {
         nfc.memory(NfcTicket.TagPage) == NfcTicket.TagBytes
@@ -29,8 +33,7 @@ case class NfcTicket(nfc: NfcTools) {
     }
 
     private def readData(currentCounter: Int): Ticket = {
-        val codec =
-            Ticket.codec(Uid, NfcTicket.authenticationKey(UidBytes), currentCounter)
+        val codec = Ticket.fullCodec(this, currentCounter)
 
         val size = (codec.sizeBound.exact.get.toInt + 7) / 8
 
@@ -44,10 +47,10 @@ case class NfcTicket(nfc: NfcTools) {
         data
     }
 
-    private def writeData(data: Ticket, counter: Int): Unit = {
-        val nextCounter = counter + 1
+    def writeData(data: Ticket): Unit = {
+        val nextCounter = data.counter + 1
 
-        val codec = Ticket.codec(Uid, authenticationKey, nextCounter)
+        val codec = Ticket.fullCodec(this, nextCounter)
 
         val bits = codec.encode(data).require
 
@@ -60,10 +63,16 @@ case class NfcTicket(nfc: NfcTools) {
         nfc.save()
 
         val writtenData = readData(nextCounter)
-        check(data == writtenData, s"Mismatch between written and expect " +
-                s"\nR $data\nW $writtenData\n")
+        if (writtenData != data) {
+            throw new IllegalStateException(
+                s"""Mismatch between written and expected
+                   |R $data
+                   |W $writtenData
+                   |""".stripMargin)
+        }
 
         nfc.incrementCounter()
+        nfc.save()
     }
 
     def check(cond: Boolean, s: String): Unit = {
@@ -84,26 +93,28 @@ case class NfcTicket(nfc: NfcTools) {
 
         nfc.save()
 
-        check(nfc.utils.changeKey(desAuthenticationKey.toArray), "Can't " +
-                "change key")
+        check(
+            nfc.utils.changeKey(desAuthenticationKey.toArray),
+            "Can't change key"
+        )
         println("3DES key changed.")
 
         writeData(
             Ticket(
-                Uid,
+                uid,
+                nfc.getCounter,
                 0,
                 List[Ticket.Subscription](None, None, None)
-            ),
-            nfc.getCounter
+            )
         )
     }
 
     def authenticate(): Unit = {
-        if (!nfc.authenticate(NfcConstants.DefaultKey)) {
-            println("3DES authentication with default key failed.")
+        if (!nfc.authenticate(desAuthenticationKey)) {
+            println("3DES authentication with UID key failed.")
 
-            check(nfc.authenticate(desAuthenticationKey),
-                "3DES authentication with UID key failed.")
+            check(nfc.authenticate(NfcConstants.DefaultKey),
+                "3DES authentication with default key failed.")
         }
 
         println("3DES authenticated.")

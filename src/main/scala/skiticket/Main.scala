@@ -1,5 +1,6 @@
 package skiticket
 
+import skiticket.data.NfcTicket
 import skiticket.nfc.NfcTools
 
 object Main extends App {

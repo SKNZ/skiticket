@@ -129,7 +129,7 @@ public class UltralightUtilities {
 	public boolean eraseMemory() throws CardException {
 		boolean status = false;
 		// Pages 0..3 are read-only or write-once.
-		for (int i = 4; i <= 39; i++) {
+		for (int i = 4; i < 39; i++) {
 			status = erasePage(i);
 			if (!status)
 				break;

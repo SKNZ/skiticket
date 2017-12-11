@@ -1,4 +1,4 @@
-package skiticket
+package skiticket.data
 
 import java.time.{Duration, LocalDate, LocalDateTime}
 import javax.crypto.Mac
@@ -6,33 +6,37 @@ import javax.crypto.spec.SecretKeySpec
 
 import scodec._
 import scodec.codecs._
-import skiticket.Ticket.Subscription
+import skiticket.data.Ticket.Subscription
 import skiticket.nfc.NfcConstants
 import skiticket.utils.codecs._
 
 object Errors extends Enumeration {
+    val PassBackProtection = Val("Pass back protection")
+    val NoRidesOrSubscription = Val("No rides or subscriptions left")
+    val BlackListed = Val("Your UID is blacklisted")
 
     protected case class Val(message: String) extends super.Val
 
-    val PassBackProtection = Val("Pass back protection")
-    val NoRidesOrSubscription = Val("No rides or subscriptions left")
 }
 
 case class Ticket(uid: Long,
+                  counter: Int,
                   ridesRemaining: Int,
                   subscriptions: Seq[Subscription],
                   lastValidation: LocalDateTime = Ticket.BaseDate) {
     require(ridesRemaining >= 0, "Negative number of rides")
     require(ridesRemaining <= Ticket.MaxNumberOfRides, "Too many rides")
+    require(lastValidation.getNano == 0)
 
     // Subscription validation
     {
         val maxDate: LocalDateTime =
             LocalDateTime.now().plusDays(Ticket.MaxSubscriptionLength)
 
-        require(subscriptions.size <= Ticket.MaxNumberOfSubscriptions)
+        require(subscriptions.size == Ticket.MaxNumberOfSubscriptions)
         subscriptions.foreach {
             case Some(Left(expiryDate: LocalDateTime)) =>
+                require(expiryDate.getNano == 0)
                 require(maxDate.isAfter(expiryDate),
                     "Active subscription too long")
 
@@ -67,8 +71,11 @@ case class Ticket(uid: Long,
         val timeDifference =
             Duration.between(lastValidation, LocalDateTime.now())
 
+        if (ValidationLogger.isBlacklisted(uid)) {
+            Left(Errors.BlackListed)
+        }
         // Pass back validation
-        if (!ignorePassBack
+        else if (!ignorePassBack
                 && timeDifference.compareTo(Ticket.AntiPassBackTimer) < 0) {
             Left(Errors.PassBackProtection)
         }
@@ -84,7 +91,7 @@ case class Ticket(uid: Long,
                 case (Some(Right(days)), i) =>
                     val newSubscriptions = subscriptions.updated(
                         i,
-                        Some(Left(LocalDateTime.now().plusDays(days)))
+                        Some(Left(LocalDateTime.now().plusDays(days).withNano(0)))
                     )
 
                     copy(subscriptions = newSubscriptions)
@@ -98,13 +105,33 @@ case class Ticket(uid: Long,
             activeSubscription
                     .orElse(validSubscription)
                     .orElse(ridesBased)
-                    .map(t => t.copy(lastValidation = LocalDateTime.now()))
+                    .map(t => t.copy(lastValidation = LocalDateTime.now().withNano(0)))
                     .map(t => {
+                        ValidationLogger.addPassage(LogEntry(uid, counter))
                         t
                     })
                     .toRight(Errors.NoRidesOrSubscription)
         }
     }
+
+    override def equals(o: scala.Any): Boolean = o match {
+        case Ticket(this.uid, _, this.ridesRemaining, this.subscriptions, this.lastValidation) =>
+            true
+        case _ => false
+    }
+
+//    override def hashCode(): Int = {
+//        val prime = 31
+//        var result = 1
+//
+//        result = prime * result + uid.hashCode()
+//        result = prime * result + ridesRemaining.hashCode()
+//        result = prime * result + subscriptions.hashCode()
+//        result = prime * result + subscriptions.hashCode()
+//        result = prime * result + lastValidation.hashCode()
+//
+//        result
+//    }
 }
 
 object Ticket {
@@ -121,7 +148,14 @@ object Ticket {
     private val dateTimeCodec =
         offsetDateTimeCodec(BaseDate, subscriptionHoursCodec)
 
-    def codec(uid: Long, keyBytes: Seq[Byte], counter: Int): Codec[Ticket] = {
+    def fullCodec(nfcTicket: NfcTicket, counter: Int): Codec[Ticket] = {
+        val uid = nfcTicket.uid
+        val keyBytes = nfcTicket.authenticationKey
+
+        fullCodec(counter, uid, keyBytes)
+    }
+
+    private def fullCodec(counter: Int, uid: Long, keyBytes: Seq[Byte]) = {
         val macAlgorithm = "HmacMD5"
         val key = new SecretKeySpec(keyBytes.toArray, macAlgorithm)
         val macInstance = Mac.getInstance(macAlgorithm)
@@ -129,7 +163,11 @@ object Ticket {
 
         val suffix = uint32L.encode(counter).require
 
-        macCodec(macInstance, suffix)(("uid" | provide(uid)) :: dataCodec).as[Ticket]
+        macCodec(macInstance, suffix)(
+            ("uid" | provide(uid)) ::
+                    ("counter" | provide(counter)) ::
+                    dataCodec
+        ).as[Ticket]
     }
 
     val dataCodec = ("ridesRemaining" | uint16L) ::
@@ -146,7 +184,7 @@ object Ticket {
             )) ::
             ("lastValidation" | dateTimeCodec)
 
-    val size: Int = codec(0, Array[Byte](), 0).sizeBound.exact.get.toInt
+    val size: Int = fullCodec(0, 0, new Array[Byte](16)).sizeBound.exact.get.toInt
     val sizeInPages: Int = ((size + 7) / 8 + NfcConstants.PageSize - 1) / NfcConstants.PageSize
 }
 

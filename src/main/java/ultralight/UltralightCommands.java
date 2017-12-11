@@ -14,7 +14,7 @@ public class UltralightCommands {
 
 	// Set true to ignore writes to page 2 and to emulate page 3 with page 15:
 	// Set false to really write the OTP and lock bits (cannot be reset).
-	public static final boolean safe = true;
+	public static final boolean safe = false;
 	private HashMap<Integer, Integer> pageMap = new HashMap<Integer, Integer>();
 
 	/**

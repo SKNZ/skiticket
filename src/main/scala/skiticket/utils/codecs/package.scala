@@ -45,6 +45,10 @@ package object codecs {
                     throw new IllegalArgumentException("Need datetime before " +
                             "base date")
                 }
+
+                require(dateTime.getNano == 0)
+                require(baseDate.getNano == 0)
+
                 val seconds = ChronoUnit.SECONDS.between(baseDate, dateTime)
                 Attempt.successful(integral.fromInt(seconds.toInt))
             })
