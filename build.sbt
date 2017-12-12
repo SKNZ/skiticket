@@ -6,8 +6,10 @@ lazy val root = (project in file(".")).
                 organization := "net.sec.nfc",
                 scalaVersion := "2.12.4",
                 version := "0.1.0-SNAPSHOT",
-                parallelExecution := false
+                parallelExecution := false,
+                retrieveManaged := true
             )),
+            test in assembly := {},
             concurrentRestrictions in Global += Tags.limit(Tags.Test, 1),
             name := "SkiTicket",
             libraryDependencies += scalaTest % Test,

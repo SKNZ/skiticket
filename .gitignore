@@ -158,3 +158,4 @@ project/plugins/project/
 .history
 .cache
 .lib/
+lib_managed/
