@@ -53,7 +53,7 @@ select p1.id, p1.counter as p1c, p1.time as p1t, p2.counter as p2c, p2.time as p
 
             items.clear()
             try {
-                Thread.sleep(5000)
+                Thread.sleep(500)
             } catch {
                 case _: InterruptedException =>
             }

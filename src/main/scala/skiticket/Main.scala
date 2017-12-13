@@ -2,7 +2,6 @@ package skiticket
 
 import skiticket.data.{NfcTicket, ValidationLogger}
 import skiticket.nfc.NfcTools
-import sun.misc.{Signal, SignalHandler}
 
 import scala.util.control.NonFatal
 
@@ -13,7 +12,8 @@ object Main extends App {
         printUsage()
     }
     else {
-        if (args(0) == "issue") { val ridesNumber = args(1).toInt
+        if (args(0) == "issue") {
+            val ridesNumber = args(1).toInt
             val subscription = args(2).toInt
             val format = args(3).toBoolean
 
@@ -125,6 +125,7 @@ use <ignorePassBack> <blacklistFirstCard> <tearingTest>
     }
 
     def bprintln(x: Any) = println(s"${Console.BOLD}$x${Console.RESET}")
+
     def oprintln(x: Any) = bprintln(s"${Console.YELLOW}$x")
 
     def rprintln(x: Any) = bprintln(s"${Console.RED}$x")
