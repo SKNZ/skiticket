@@ -50,7 +50,7 @@ Authors: Floran NARENJI-SHESHKALANI (643166) \& Jean-Marcellin TRUONG (643357)
 This ski ticket can hold both value and time subscription.
 The former is stored as a decrementing number of rides.
 For the later, a dormant subscription is stored as a number of hours, while an
-active subscription is stored as an expiry date/time.
+active subscription is stored as an expiry date \& time.
 Time subscriptions will be used prioritarily over value.
 
 This design is simplistic, and does not support advanced features such as cash
@@ -67,7 +67,7 @@ complex use cases.
 
 The ticket also provides pass back protection with a one minute cooldown time
 between ticket validations, no matter the type of subscription.
-Pass back protection here is intended against malicious users trying
+Pass back protection here is intended against malicious users trying to
 use a single card for two persons (i.e.\ the card is personnal and not to be
 shared).
 
@@ -81,86 +81,12 @@ billing twice for the same ride) could be implemented by a rather simple
 software update deployed to the readers, without updating the
 card's internal structure.
 
-\section{Implementation}
+Finally, on the reader's side, there is a heuristic for detecting falsified
+cards based on detection of reuse of old data that leads to card blacklisting.
+This heuristic requires networking (centralized database) and is therefore
+designed to fail gracefully while allowing the rest of the system to proceed.
 
-\subsection{Platform choice}
-
-The prototype runs on the PC platform instead of the Android default.
-The main motivation for that choice is that the PC provides a faster
-edit/build/debug cycle and also had good support for unit testing.
-With the provided NFC library being in Java, it was elected to write the
-prototype in Scala (both run on the JVM and therefore have good
-interoperability).
-Scala was chosen because it is generally a more modern, elegant and fun (in the
-writer's opinion) language compared to Java.
-
-\subsection{Serialization library}
-
-For manipulating binary data, we use the \texttt{scodec} library.
-This serialization library defines an algebra for mapping Scala data structures
-(`case classes') to binary format by usage of codecs. 
-
-A lot of useful codecs are provided by default, however the use cases at hand
-required some custom codecs (e.g.\ for MAC, offset date time storage\ldots).
-
-\texttt{scodec} is designed such that the programmer does not explicitly select
-the individual position of each field of the ticket. Instead, the (simplified)
-idea is to define a codec for each field and to let \texttt{scodec} handle bit
-packing, manipulation, alignment\ldots.
-Note that \texttt{scodec} preserves the order of the fields as written in the
-codec \& case class.
-
-For a interacting with space constrained environments such as an NFC card or
-legacy systems (with different endianesses\ldots), which are clearly not Java's
-forte, \texttt{scodec} is quite handy.
-
-The custom codecs can be found in the
-\url{src/main/scala/skiticket/utils/codecs/package.scala} file.
-The codec for the Ticket class itself is at the bottom of the
-\url{src/main/scala/skiticket/data/Ticket.scala} file.
-
-\subsection{Unit testing}
-
-For unit testing, \texttt{ScalaTest}, the standard unit testing library for
-Scala, is used.
-Unit tests enable painless writing of fully autonomous and unsupervised test
-cases for all the use cases of the library.
-Compared to manual testing, this is even more advantageous than for traditional
-software: this removes the need for unlocking a smartphone, deploying the app,
-tapping the card one or more times depending on the complexity of the use case,
-and also avoids all form of run-time human errors.
-
-Note that those are not unit tests in the strictest sense as they rely on
-external resources (NFC card, NFC card reader \& in-memory database) and
-necessarily test more than a single feature (e.g.\ NFC test cases begin with at
-least authentication and formatting).
-
-Unit tests can be found the 
-\url{src/test/scala/skiticket/nfc/NfcTicketTest.scala} file.
-
-\subsection{Runnable}
-
-The final form of the prototype is a library with a demonstration application.
-Having the ticket functionalities as library (in the sense of a separate set of
-classes) potentially allows for porting on a different platform, and for usage
-with other JVM language, such as Java (e.g.\ porting to an Android app is
-realistic).
-
-The demonstration client is located in the 
-\url{src/main/scala/skiticket/Main.scala} file.
-Its features are described in the section below.
-
-The library itself consists of the subfolders in the
-\url{src/main/scala/skiticket/} folder.
-All files are commented where useful and have JavaDoc.
-
-\subsection{Sanity checks}
-
-The number of rides loaded on a card can not exceed 100.
-The maximum duration of a subscription is 365 days (e.g.\ season pass including
-glacier skiing).
-
-\section{Running instructions}
+\section{Getting started}
 
 \subsection{Prebuilt binaries}
 
@@ -198,6 +124,83 @@ At the end of the tests, a summary will be shown.
 Both commands above will automatically take care of all necessary steps such as
 dependency download (which can take some time for first launch) and compilation.
 
+\section{Implementation}
+
+\subsection{Platform choice}
+
+The prototype runs on the PC platform instead of the Android default.
+The main motivation for that choice is that the PC provides a faster
+edit/build/debug cycle and also has good support for unit testing.
+With the provided NFC library being in Java, it was elected to write the
+prototype in Scala (both run on the JVM and therefore have good
+interoperability).
+Scala was chosen because it is generally a more modern, elegant and fun (in the
+writer's opinion) language compared to Java.
+
+\subsection{Serialization library}
+
+For manipulating binary data, we use the \texttt{scodec} library.
+This serialization library defines an algebra for mapping Scala data structures
+(`case classes') to binary format by usage of codecs. 
+
+A lot of useful codecs are provided by default, however the use cases at hand
+required some custom codecs (e.g.\ for MAC, tear protection, offset date time storage\ldots).
+
+\texttt{scodec} is designed such that the programmer does not explicitly select
+the individual position of each field of the ticket. Instead, the (simplified)
+idea is to define a codec for each field and to let \texttt{scodec} handle bit
+packing, manipulation, alignment\ldots.
+Note that \texttt{scodec} preserves the order of the fields as written in the
+codec \& case class.
+
+For interacting with space constrained environments such as an NFC card or
+legacy systems (with different endianesses\ldots), which are clearly not Java's
+forte, \texttt{scodec} is quite handy.
+
+The custom codecs can be found in the
+\url{src/main/scala/skiticket/utils/codecs/package.scala} file.
+The codec for the Ticket class itself is at the bottom of the
+\url{src/main/scala/skiticket/data/Ticket.scala} file.
+
+\subsection{Unit testing}
+
+For unit testing, \texttt{ScalaTest}, the standard unit testing library for
+Scala, is used.
+Unit tests enable painless writing of fully autonomous and unsupervised test
+cases for all the use cases of the library.
+Compared to manual testing, this is even more advantageous than for traditional
+software: this removes the need for unlocking a smartphone, deploying the app,
+tapping the card one or more times depending on the complexity of the use case,
+and also avoids all form of run-time human errors.
+
+Note that those are not unit tests in the strictest sense as they rely on
+external resources (NFC card, NFC card reader \& in-memory database) and
+necessarily test more than a single feature (e.g.\ NFC test cases begin with at
+least authentication and formatting).
+
+Unit tests can be found the 
+\url{src/test/scala/skiticket/nfc/NfcTicketTest.scala} file.
+
+\subsection{Runnable}
+
+The final form of the prototype is a library with a demonstration application.
+Having the ticket functionalities as a library (in the sense of a separate set
+of classes) makes goals such as porting to an Android app realistic.
+
+The demonstration client is located in the 
+\url{src/main/scala/skiticket/Main.scala} file.
+Its features are described in the section below.
+
+The library itself consists of the subfolders in the
+\url{src/main/scala/skiticket/} folder.
+All files are commented where useful and have JavaDoc.
+
+\subsection{Sanity checks}
+
+The number of rides loaded on a card can not exceed 100.
+The maximum duration of a subscription is 365 days (e.g.\ season pass including
+glacier skiing).
+
 \section{NFC card internals}
 
 \subsection{Card-based security}
@@ -207,13 +210,16 @@ its default to a key calculated as follows, with $H$ being SHA256 and $||$ being
 concatenation:
 
 \begin{align*}
-    K = H{(H(MasterKey) || H(UID))}_{0..15}
+    K = H{(H(DesMasterKey) || H(UID))}_{0..15}
 \end{align*}
 
 The key is therefore a function of both hash and UID\@.
 
 The authentication bits are set such that reading and writing on any page
 requires authentication.
+
+Note that because 3DES is deprecated, the master key used for 3DES is
+different than the one used for message authentication.
 
 \subsection{Memory structure}
 
@@ -247,9 +253,9 @@ requires authentication.
         22 & \multicolumn{4}{|c|}{} \\
         23 & \multicolumn{4}{|c|}{} \\
         \hline
-        \multicolumn{5}{|c|}{...} \\
+        \multicolumn{5}{|c|}{\ldots} \\
         \hline
-        41 & \multicolumn{2}{|c|}{Mono. counter} & & \\
+        41 & \multicolumn{2}{|c|}{Mono.\ counter} & & \\
         \hline
     \end{tabular}
     \caption{NFC card memory organization}
@@ -262,7 +268,7 @@ requires authentication.
         \hline
         \# & Byte 0 & Byte 1 & Byte 2 & Byte 3 \\
         \hline
-        i+0 & \multicolumn{2}{|c|}{No. rides} & \multicolumn{2}{|c|}{Sub \#1} \\
+        i+0 & \multicolumn{2}{|c|}{No.\ rides} & \multicolumn{2}{|c|}{Sub \#1} \\
         \hline
         i+1 & \multicolumn{2}{|c|}{Sub \#1} & \multicolumn{2}{|c|}{Sub \#2} \\
         \hline
@@ -290,12 +296,12 @@ requires authentication.
 In \autoref{t2}, we can see all the feature fields.
 The number of rides is stored as a decrementing short integer.
 The subscriptions are each stored as a 4-byte integer.
-A dormant one has its first bit set to 1 and the remaining bits contains the
+A dormant one has its first bit set to 1 and the remaining bits contain the
 number of hours for the subscription.
 An active one has its first bit set to 0 and is stored as an offset number of
 seconds representing the expiry date. The SKI epoch is set to 2017-12-03
 00:00:00, to avoid overflow concerns.
-The expiry date is calculated as time of first use plus duration in hours.
+The expiry date is calculated as time of first use (down to the second) plus duration in hours.
 
 The last validation field provides information for the pass back detection
 feature, and is also stored as an offset number of seconds since SKI epoch.
@@ -306,7 +312,7 @@ This prevents man-in-the-middle attacks.
 The MAC is computed as, with $H$ being SHA-256, $HMAC$ being HMAC-MD5 and $||$
 being concatenation:
 \begin{align*}
-    & K = H(H(MasterKey) || H(UID)) \\
+    & K = H(H(HmacMasterKey) || H(UID)) \\
     & MAC = HMAC(Data || Counter, K)
 \end{align*}
 
@@ -317,6 +323,9 @@ Note that usage of the monotonic counter is not necessary for that, it would
 have been sufficient to just have the counter as part of the data block.
 This choice is justified by the fact that the monotonic has a second use in
 tearing protection.
+
+Again, note that the master key used here is different than the one used for
+3DES authentication.
 
 \subsection{Tearing protection}
 
@@ -344,24 +353,21 @@ monotonic counter, marking the newly written data block as the working one.
 
 \section{Final thoughts}
 
-Because the card use 3DES as an authentication measure, storage of the master
+Because the card uses 3DES as an authentication measure, storage of the master
 key is the main concern in order to ensure the safety of the system.
 In the prototype, the master key is locally stored in the reader device.
 Even if it was stored inside a secure hardware module, theft of it would still
 be possible: because the reader device is outside, it has, from a security
 standpoint, to be considered as if it was in the enemy's hands.
 
-We've thought long and hard, discussed with the course's members multiple times
-and came to the following conclusion.
-
-Many mitigation techniques could be employed.
+In the end, many mitigation techniques could be employed.
 They could contain elements of data heuristics, asymmetric cryptography (as
 discussed during the presentation) or require permanent online access (which
 is generally far from guaranteed in a skiing resort).
 
-In the end, the system's main limitation is really the card (lack of session
+However, the system's main limitation is really the card (lack of session
 security and asymmetric cryptography on the card's side).
-Development \& maintenance costs those heuristics or online systems
+Development \& maintenance costs of those heuristics or online systems
 would probably be higher than simply having a better, higher-end card.
 From a business standpoint, better cards would have a deposit on them, making
 that a higher initial investiment, but a zero-sum operation in the mid term (or
@@ -369,7 +375,14 @@ one could even make a profit on the deposits).
 
 From another point of view, one might also argue that the system does not need
 to be mathematically foolproof, only strong enough to deter most attackers.
-Whether that is true or not can be argued both ways.
+
+Finally, from an academic standpoint, we feel this project a good opportunity to
+explore safety concerns on our own.
+Being able to design a working prototype is a rewarding addition, and usage of
+normal NFC tags brings real-world constraints into the project, which is
+enjoyable.
+Our only regret is not having been able to design a more advanced system that
+would have been more secure.
 
 \end{document}
 
