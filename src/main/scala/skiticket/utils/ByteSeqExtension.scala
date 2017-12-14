@@ -4,6 +4,9 @@ import skiticket.nfc.NfcConstants
 
 import scala.collection.mutable
 
+/**
+  * Extensions for Seq[Byte] and related manipulation with Array[Byte]
+  */
 object ByteSeqExtension {
 
     class RichByteSeq(val seq: Seq[Byte]) extends AnyVal {

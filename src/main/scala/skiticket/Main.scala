@@ -1,10 +1,13 @@
 package skiticket
 
-import skiticket.data.{NfcTicket, ValidationLogger}
+import skiticket.data.{TicketOps, ValidationLogger}
 import skiticket.nfc.NfcTools
 
 import scala.util.control.NonFatal
 
+/**
+  * Main object
+  */
 object Main extends App {
     if (args.length < 1
             || (args(0) == "issue" && args.length != 4)
@@ -13,6 +16,7 @@ object Main extends App {
     }
     else {
         if (args(0) == "issue") {
+            // Will throw if invalid format, good enough for demo
             val ridesNumber = args(1).toInt
             val subscription = args(2).toInt
             val format = args(3).toBoolean
@@ -21,7 +25,8 @@ object Main extends App {
         } else if (args(0) == "use") {
             val ignorePassback = args(1).toBoolean
             val blacklistFirstCard = args(2).toBoolean
-            NfcTicket.TearingTest = args(3).toBoolean
+            // This is static to enable tearing testing
+            TicketOps.TearingTest = args(3).toBoolean
 
             use(ignorePassback, blacklistFirstCard)
         }
@@ -31,57 +36,81 @@ object Main extends App {
 
     }
 
+    /**
+      * Issues a ticket.
+      *
+      * @param ridesNumber  number of rides to be added
+      * @param subscription subscription days to
+      * @param format       force reset of the card before issuing
+      */
     def issue(ridesNumber: Int, subscription: Int, format: Boolean): Unit = {
         val nfcTools = NfcTools()
-        val nfcTicket = NfcTicket(nfcTools)
+        val ops = TicketOps(nfcTools)
 
         println("Authenticating")
-        nfcTicket.authenticate()
-        val isTicket = nfcTicket.isSkiTicket
+        ops.authenticate()
+        val isTicket = ops.isSkiTicket
         if (!isTicket || format) {
-            println(s"Formatting (was necessary: ${!isTicket}")
-            nfcTicket.format()
+            println(s"Formatting was necessary: ${!isTicket}")
+            ops.format()
         }
 
-        val readTicket = nfcTicket.readData()
+        // Read the ticket that's on the card
+        val readTicket = ops.read()
         println(s"Read ticket: $readTicket")
+        // Ticket object is immutable, use mutators to issue ticket
         val issuedTicket = readTicket.issueRides(ridesNumber).issueSubscription(subscription)
         println(s"Issued ticket: $issuedTicket")
 
-        nfcTicket.writeData(issuedTicket)
+        ops.write(issuedTicket)
         println("Done.")
     }
 
-    def use(ignorePassback: Boolean, blacklistFirstCard: Boolean): Unit = {
+    /**
+      * Validates tickets in a loop until killed.
+      * @param ignorePassBack ignore pass back validation
+      * @param blacklistFirstCard black list the first card that's presented
+      */
+    def use(ignorePassBack: Boolean, blacklistFirstCard: Boolean): Unit = {
+        // Start fraud detector
         ValidationLogger.start()
+
         if (blacklistFirstCard) {
             gprintln("Present card to be blacklisted.")
             val tools = NfcTools()
-            val nfcTicket = NfcTicket(tools)
-            ValidationLogger.blackList(nfcTicket.uid)
+            // Read first card presented and blacklist, we don't even care if
+            // it's a proper ticket or not
+            val ops = TicketOps(tools)
+            ValidationLogger.blackList(ops.uid)
             gprintln("OK. Please remove card.")
             tools.waitRemoved()
         }
 
         while (true) {
-            var auth = false
+            var valid = false
             var nfcTools: NfcTools = null
+
             try {
                 nfcTools = NfcTools()
-                val nfcTicket = NfcTicket(nfcTools)
-                nfcTicket.authenticate()
+                val ops = TicketOps(nfcTools)
+                ops.authenticate()
 
-                if (!nfcTicket.isSkiTicket) {
+                if (!ops.isSkiTicket) {
                     rprintln("Result: not a ski ticket.")
                 } else {
-                    val ticket = nfcTicket.readData()
-                    val validatedTicket = ticket.validate(ignorePassback)
+                    // Read the ticket
+                    val ticket = ops.read()
+
+                    // Validate (will decrement etc)
+                    val validatedTicket = ticket.validate(ops.uid, ignorePassBack)
+
+                    // If there is valid ticket, save the validated ticket
                     validatedTicket.right.foreach(x => {
-                        nfcTicket.writeData(x)
-                        auth = true
+                        ops.write(x)
+                        valid = true
                     })
 
-                    aprintln(auth, s"Result: $validatedTicket")
+                    aprintln(valid, s"Result: $validatedTicket")
                 }
             } catch {
                 case NonFatal(e) =>
@@ -93,9 +122,11 @@ object Main extends App {
                     nfcTools.waitRemoved()
                 } catch {
                     case e: Throwable =>
+                        // We don't care about that
                 }
             }
         }
+
         ValidationLogger.stop()
     }
 
@@ -124,14 +155,19 @@ use <ignorePassBack> <blacklistFirstCard> <tearingTest>
 """)
     }
 
+    // Prints bold
     def bprintln(x: Any) = println(s"${Console.BOLD}$x${Console.RESET}")
 
+    // Prints yellow bold
     def oprintln(x: Any) = bprintln(s"${Console.YELLOW}$x")
 
+    // Prints red bold
     def rprintln(x: Any) = bprintln(s"${Console.RED}$x")
 
+    // Prints green
     def gprintln(x: Any) = bprintln(s"${Console.GREEN}$x${Console.RESET}")
 
+    // Prints bold, green if true false otherwise
     def aprintln(y: Boolean, x: Any) = if (y) gprintln(x) else rprintln(x)
 
 }

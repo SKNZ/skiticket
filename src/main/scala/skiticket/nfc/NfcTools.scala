@@ -4,15 +4,22 @@ import javax.smartcardio.CardException
 
 import scodec.bits.BitVector
 import scodec.codecs._
-import skiticket.data.NfcTicket
+import skiticket.data.TicketOps
 import skiticket.utils.ByteSeqExtension._
 import skiticket.utils.LazyPagedArray
 import ultralight.{CardReader, UltralightCommands, UltralightUtilities}
 
 import scala.collection.mutable.ArrayBuffer
 
-case class NfcException(s: String) extends Exception(s)
+/**
+  * An exception caused by the NFC tooling/card
+  * @param reason error message
+  */
+case class NfcException(reason: String) extends Exception(reason)
 
+/**
+  * Tools used to simply NFC manipulation
+  */
 case class NfcTools() {
     val cardReader = new CardReader(System.out, null)
 
@@ -24,6 +31,9 @@ case class NfcTools() {
 
     def utils: UltralightUtilities = _utils
 
+    /**
+      * Memory mapping with lazy loading
+      */
     val memory: LazyPagedArray =
         LazyPagedArray(NfcConstants.MemorySize, NfcConstants.PageSize) { i =>
             ArrayBuffer(utils.readPage(i):_*)
@@ -34,8 +44,12 @@ case class NfcTools() {
                 }
         }
 
+    // Initial connection
     reconnect()
 
+    /**
+      * (Re)connects to the card, discarding previous connection
+      */
     def reconnect(): Unit = {
         if (!cardReader.initCard()) {
             throw NfcException("Can't get card")
@@ -47,12 +61,20 @@ case class NfcTools() {
         println(s"SAFE MODE: ${UltralightCommands.safe}")
     }
 
+    /**
+      * Write any pending state to the card
+      */
     def save(): Unit = {
         memory.flush()
     }
 
     private var alreadyTriedAuth: Boolean = false
 
+    /**
+      * Authenticates with key.
+      * @param key 3DES key
+      * @return true if ok, false otherwise
+      */
     def authenticate(key: Seq[Byte]): Boolean = {
         try {
             println(s"3DES trying with ${key.toHexString}.")
@@ -73,9 +95,14 @@ case class NfcTools() {
     }
 
     private var counterCache: Option[Int] = None
+
+    /**
+      * Gets the monotonic counter
+      * @return the monotonic counter value
+      */
     def getCounter: Int = {
         if (counterCache.isEmpty) {
-            val page = utils.readPage(NfcTicket.CounterPage)
+            val page = utils.readPage(NfcTools.CounterPage)
 
             counterCache = Some(uint32L.decode(BitVector(page))
                     .require
@@ -88,6 +115,9 @@ case class NfcTools() {
         counterCache.get
     }
 
+    /**
+      * Increment monotonic counter
+      */
     def incrementCounter(): Unit = {
         // Safe mode can't handle muh monotonic counter
         val buffer = uint32L.encode(if (UltralightCommands.safe) {
@@ -96,19 +126,33 @@ case class NfcTools() {
             1
         }).require.bytes.toArray
 
-        if (!utils.writePages(buffer, 0, NfcTicket.CounterPage, 1)) {
+        if (!utils.writePages(buffer, 0, NfcTools.CounterPage, 1)) {
             throw NfcException("Can't write to monotonic counter")
         }
+        // We want to reread counter after write
         counterCache = None
     }
 
+    /**
+      * Disconnects from card
+      */
     def disconnect(): Unit = {
         cardReader.disconnect()
     }
 
+    /**
+      * Wait for card to be removed
+      */
     def waitRemoved(): Unit = {
         cardReader.waitRemoved()
     }
 
+}
+
+object NfcTools {
+    /**
+      * Monotonic counter's page
+      */
+    val CounterPage = 41
 }
 

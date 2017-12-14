@@ -6,11 +6,15 @@ import javax.crypto.spec.SecretKeySpec
 
 import scodec._
 import scodec.codecs._
+import shapeless.HNil
 import skiticket.data.Ticket.Subscription
 import skiticket.nfc.NfcConstants
 import skiticket.utils.codecs._
 
-object Errors extends Enumeration {
+/**
+  * Possible validation errors
+  */
+object ValidationErrors extends Enumeration {
     val PassBackProtection = Val("Pass back protection")
     val NoRidesOrSubscription = Val("No rides or subscriptions left")
     val BlackListed = Val("Your UID is blacklisted")
@@ -19,66 +23,98 @@ object Errors extends Enumeration {
 
 }
 
-case class Ticket(uid: Long,
-                  ridesRemaining: Int,
+/**
+  * Contents of a Ticket. Immutable.
+  *
+  * @param ridesRemaining number of rides remaining on card
+  * @param subscriptions  hours-based subscriptions
+  * @param lastValidation last validation time
+  */
+case class Ticket(ridesRemaining: Int,
                   subscriptions: Seq[Subscription],
-                  lastValidation: LocalDateTime = Ticket.BaseDate) {
+                  lastValidation: LocalDateTime = Ticket.TicketEpoch) {
     require(ridesRemaining >= 0, "Negative number of rides")
     require(ridesRemaining <= Ticket.MaxNumberOfRides, "Too many rides")
     require(lastValidation.getNano == 0)
 
-    // Subscription validation
+    // Subscription sanity checking
     {
         val maxDate: LocalDateTime =
             LocalDateTime.now().plusDays(Ticket.MaxSubscriptionLength)
 
-        require(subscriptions.size == Ticket.MaxNumberOfSubscriptions)
+        require(subscriptions.lengthCompare(Ticket.MaxNumberOfSubscriptions) == 0)
         subscriptions.foreach {
             case Some(Left(expiryDate: LocalDateTime)) =>
                 require(expiryDate.getNano == 0)
                 require(maxDate.isAfter(expiryDate),
                     "Active subscription too long")
 
-            case Some(Right(days: Int)) =>
-                require(days > 0, "Null length subscription not allowed")
-                require(days <= Ticket.MaxSubscriptionLength,
+            case Some(Right(hours: Int)) =>
+                require(hours > 0, "Null length subscription not allowed")
+                require(hours <= Ticket.MaxSubscriptionLength,
                     "Inactive subscription too long")
 
             case None =>
         }
     }
 
+    /**
+      * Issues a copy of this ticket with added number of rides.
+      *
+      * @param rides number of rides to add
+      * @return ticket with added rides
+      */
     def issueRides(rides: Int): Ticket = {
         copy(ridesRemaining = ridesRemaining + rides)
     }
 
-    def issueSubscription(days: Int): Ticket = {
-        if (days != 0) {
+    /**
+      * Issues a copy of this ticket with new subscription.
+      * New subscription will take empty spot or replace expired one.
+      * Throws if no room.
+      *
+      * @param hours number of hours of new subscription. If 0, nothing done.
+      * @return ticket with added subscription
+      */
+    def issueSubscription(hours: Int): Ticket = {
+        if (hours != 0) {
+            // Find index of expired subscription or unused spot
             val expiredIndex = subscriptions.zipWithIndex.collectFirst {
                 case (Some(Left(expiry)), i) if expiry.isBefore(LocalDateTime.now()) =>
                     i
                 case (None, i) =>
                     i
             }
+
             require(expiredIndex.isDefined)
             val newSubscriptions =
-                subscriptions.updated(expiredIndex.get, Some(Right(days)))
+                subscriptions.updated(expiredIndex.get, Some(Right(hours)))
 
             copy(subscriptions = newSubscriptions)
         } else this
     }
 
-    def validate(ignorePassBack: Boolean = false): Either[Errors.Value, Ticket] = {
+    /**
+      * Validates a ticket. Prioritizes time-based subscriptions over rides.
+      * Activates a dormant subscription if available and not other
+      * subscription is in use.
+      * Checks for blacklists. Checks for pass back.
+      *
+      * @param uid            uid for blacklist checking
+      * @param ignorePassBack disable pass back validation
+      * @return If valid, validated ticket as Right, otherwise Error as Left
+      */
+    def validate(uid: Long, ignorePassBack: Boolean = false): Either[ValidationErrors.Value, Ticket] = {
         val timeDifference =
             Duration.between(lastValidation, LocalDateTime.now())
 
         if (ValidationLogger.isBlacklisted(uid)) {
-            Left(Errors.BlackListed)
+            Left(ValidationErrors.BlackListed)
         }
         // Pass back validation
         else if (!ignorePassBack
                 && timeDifference.compareTo(Ticket.AntiPassBackTimer) < 0) {
-            Left(Errors.PassBackProtection)
+            Left(ValidationErrors.PassBackProtection)
         }
         else {
             // Do we have any already-activated valid subscriptions ?
@@ -89,10 +125,10 @@ case class Ticket(uid: Long,
 
             // Do we have any non-activated subscriptions ?
             val validSubscription = subscriptions.zipWithIndex.collectFirst {
-                case (Some(Right(days)), i) =>
+                case (Some(Right(hours)), i) =>
                     val newSubscriptions = subscriptions.updated(
                         i,
-                        Some(Left(LocalDateTime.now().plusDays(days).withNano(0)))
+                        Some(Left(LocalDateTime.now().plusHours(hours).withNano(0)))
                     )
 
                     copy(subscriptions = newSubscriptions)
@@ -107,13 +143,12 @@ case class Ticket(uid: Long,
                     .orElse(validSubscription)
                     .orElse(ridesBased)
                     .map(t => t.copy(lastValidation = LocalDateTime.now().withNano(0)))
-                    .toRight(Errors.NoRidesOrSubscription)
+                    .toRight(ValidationErrors.NoRidesOrSubscription)
         }
     }
 
     override def toString: String = {
         s"""Ticket{
-    UID: $uid
     Rides remaining: $ridesRemaining
     Sub0: ${subscriptions(0)}
     Sub1: ${subscriptions(1)}
@@ -124,54 +159,65 @@ case class Ticket(uid: Long,
 }
 
 object Ticket {
+    /**
+      * A subscription is optionally present in the form either a date & time
+      * if activated or in the form of a number of hours if dormant
+      */
     type Subscription = Option[Either[LocalDateTime, Int]]
 
     val MaxNumberOfSubscriptions = 3
     val MaxNumberOfRides = 100
-    val MaxSubscriptionLength = 365
+    val MaxSubscriptionLength = 365 * 24
     val AntiPassBackTimer: Duration = Duration.ofMinutes(1)
 
-    val BaseDate: LocalDateTime = LocalDate.of(2017, 12, 3).atStartOfDay()
+    val TicketEpoch: LocalDateTime = LocalDate.of(2017, 12, 3).atStartOfDay()
 
     private val subscriptionHoursCodec: Codec[Int] = uintL(31)
     private val dateTimeCodec =
-        offsetDateTimeCodec(BaseDate, subscriptionHoursCodec)
+        offsetDateTimeCodec(TicketEpoch, subscriptionHoursCodec)
 
-    def fullCodec(nfcTicket: NfcTicket, counter: Int): Codec[Ticket] = {
-        val uid = nfcTicket.uid
-        val keyBytes = nfcTicket.authenticationKey
-
-        fullCodec(counter, uid, keyBytes)
-    }
-
-    private def fullCodec(counter: Int, uid: Long, keyBytes: Seq[Byte]) = {
+    /**
+      * Constructs a codec for the Ticket, including Mac.
+      * @param hmacKeyBytes hmac key bytes
+      * @param counter counter to use in mac (should be current or current+1)
+      * @return ticket codec with mac validation
+      */
+    def fullCodec(hmacKeyBytes: Seq[Byte], counter: Int): Codec[Ticket] = {
         val macAlgorithm = "HmacMD5"
-        val key = new SecretKeySpec(keyBytes.toArray, macAlgorithm)
+        val key = new SecretKeySpec(hmacKeyBytes.toArray, macAlgorithm)
         val macInstance = Mac.getInstance(macAlgorithm)
         macInstance.init(key)
 
-        val suffix = uint32L.encode(counter).require
+        val suffixCodec = uint32L
+        val suffix = counter.toLong
+        val suffixBytes = suffixCodec.encode(suffix).require
 
-        macCodec(macInstance, suffix)(
-            ("uid" | provide(uid)) :: dataCodec
-        ).as[Ticket]
+        macCodec(macInstance, suffixBytes)(dataCodec)
     }
 
-    val dataCodec = ("ridesRemaining" | uint16L) ::
-            ("subscriptions" | knownSizeSeq(
-                MaxNumberOfSubscriptions,
-                presentIfNonZero(
-                    either(
-                        bool(1),
-                        dateTimeCodec,
-                        subscriptionHoursCodec
-                    ),
-                    Right(0)
-                )
-            )) ::
-            ("lastValidation" | dateTimeCodec)
+    val dataCodec: Codec[Ticket] = {
+        // uid is set as "provide" because we don't want to rewrite it
+        ("ridesRemaining" | uint16L) ::
+                ("subscriptions" | knownSizeSeq(
+                    MaxNumberOfSubscriptions,
+                    presentIfNonZero(
+                        either(
+                            bool(1),
+                            dateTimeCodec,
+                            subscriptionHoursCodec
+                        ),
+                        Right(0)
+                    )
+                )) ::
+                ("lastValidation" | dateTimeCodec)
+    }.as[Ticket]
 
-    val size: Int = fullCodec(0, 0, new Array[Byte](16)).sizeBound.exact.get.toInt
+    val size: Int = fullCodec(new Array[Byte](16), 0).sizeBound.exact.get.toInt
     val sizeInPages: Int = ((size + 7) / 8 + NfcConstants.PageSize - 1) / NfcConstants.PageSize
+
+    val empty = Ticket(
+        0,
+        List[Ticket.Subscription](None, None, None)
+    )
 }
 

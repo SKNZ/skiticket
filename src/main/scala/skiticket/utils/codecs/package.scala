@@ -10,6 +10,13 @@ import scodec.{Attempt, Codec, DecodeResult, Err, SizeBound}
 import skiticket.utils.ByteSeqExtension._
 
 package object codecs {
+    /**
+      * Codec for option that gives Some if value is non null.
+      * @param codec codec to wrap
+      * @param zeroVal zero value for codec
+      * @tparam T type of codec
+      * @return wrapped codec, Some if value present, None otherwise
+      */
     def presentIfNonZero[T](codec: Codec[T], zeroVal: T): Codec[Option[T]] = new
                     Codec[Option[T]] {
         override def decode(bits: BitVector): Attempt[DecodeResult[Option[T]]] = {
@@ -34,6 +41,14 @@ package object codecs {
         override def sizeBound: SizeBound = codec.sizeBound
     }
 
+    /**
+      * Writes a datetime as an offset number of seconds
+      * @param baseDate epoch
+      * @param numCodec codec to store number of seconds
+      * @param integral numeric type manipulation
+      * @tparam T numeric type
+      * @return codec
+      */
     def offsetDateTimeCodec[T](baseDate: LocalDateTime, numCodec: Codec[T])
                               (implicit integral: Integral[T])
     : Codec[LocalDateTime] =
@@ -53,6 +68,14 @@ package object codecs {
                 Attempt.successful(integral.fromInt(seconds.toInt))
             })
 
+    /**
+      * Codec for MAC appending
+      * @param macInstance MAC instance for calculating MAC, requires keyed
+      * @param suffix eventual suffix to append to codec before mac calculation
+      * @param valueCodec
+      * @tparam T
+      * @return
+      */
     def macCodec[T](macInstance: Mac, suffix: BitVector)(implicit valueCodec: Codec[T]): Codec[T] =
         new Codec[T] {
             require(valueCodec.sizeBound.exact.isDefined)
@@ -101,11 +124,19 @@ package object codecs {
             }
         }
 
+    /**
+      * A exact-size sequence of fixed size elements, with proper sizeBound-ing
+      * @param size size of sequence
+      * @param codec element exact-size codec
+      * @tparam T type of element
+      * @return fixed size sequence codec
+      */
     def knownSizeSeq[T](size: Int, codec: Codec[T]): Codec[Seq[T]] = new
                     Codec[Seq[T]] {
         require(codec.sizeBound.exact.isDefined)
 
         override def encode(value: Seq[T]): Attempt[BitVector] = {
+            require(value.lengthCompare(size) == 0)
             val attempt = value.map(codec.encode)
                     .fold(Attempt.successful(BitVector.empty)) {
                         case (Successful(bits1), Successful(bits2)) =>
